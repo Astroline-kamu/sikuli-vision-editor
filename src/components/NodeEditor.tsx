@@ -48,6 +48,20 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dx: number; dy: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; x: number; y: number } | null>(null)
+  const [scale, setScale] = useState(1)
+  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
+  const panningRef = useRef<{ startX: number; startY: number } | null>(null)
+
+  function clamp(v: number, min: number, max: number): number {
+    return Math.max(min, Math.min(max, v))
+  }
+
+  function toWorld(clientX: number, clientY: number): { x: number; y: number } {
+    const rect = editorRef.current!.getBoundingClientRect()
+    const x = (clientX - rect.left - offset.x) / scale
+    const y = (clientY - rect.top - offset.y) / scale
+    return { x, y }
+  }
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent): void {
@@ -55,17 +69,23 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         const { id, dx, dy } = draggingRef.current
         const nx = e.clientX - dx
         const ny = e.clientY - dy
-        setGraph({
-          nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)),
-          edges: graph.edges,
-        })
+        const world = toWorld(nx, ny)
+        setGraph({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: world.x, y: world.y } : n)), edges: graph.edges })
       } else if (connecting) {
-        setConnecting({ ...connecting, x: e.clientX, y: e.clientY })
+        const w = toWorld(e.clientX, e.clientY)
+        setConnecting({ ...connecting, x: w.x, y: w.y })
+      } else if (panningRef.current) {
+        const dx = e.clientX - panningRef.current.startX
+        const dy = e.clientY - panningRef.current.startY
+        panningRef.current.startX = e.clientX
+        panningRef.current.startY = e.clientY
+        setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }))
       }
     }
     function onMouseUp(): void {
       draggingRef.current = null
       setConnecting(null)
+      panningRef.current = null
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
@@ -110,12 +130,14 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   function onBackgroundMouseDown(e: React.MouseEvent): void {
     if (e.target === editorRef.current) {
       setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+      panningRef.current = { startX: e.clientX, startY: e.clientY }
     }
   }
 
   function startDragNode(n: Node, e: React.MouseEvent): void {
-    const dx = e.clientX - n.x
-    const dy = e.clientY - n.y
+    const world = toWorld(e.clientX, e.clientY)
+    const dx = e.clientX - (world.x)
+    const dy = e.clientY - (world.y)
     draggingRef.current = { id: n.id, dx, dy }
     setGraph({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
   }
@@ -123,7 +145,8 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
     e.stopPropagation()
     if (isOutput) {
-      setConnecting({ fromNodeId: n.id, fromPortId: portId, x: e.clientX, y: e.clientY })
+      const w = toWorld(e.clientX, e.clientY)
+      setConnecting({ fromNodeId: n.id, fromPortId: portId, x: w.x, y: w.y })
     }
   }
 
@@ -146,15 +169,83 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     setConnecting(null)
   }
 
+  function onWheel(e: React.WheelEvent): void {
+    e.preventDefault()
+    const rect = editorRef.current!.getBoundingClientRect()
+    const mouseClient = { x: e.clientX, y: e.clientY }
+    const world = toWorld(mouseClient.x, mouseClient.y)
+    const nextScale = clamp(scale * (1 - e.deltaY * 0.001), 0.25, 2)
+    const nextOffsetX = mouseClient.x - rect.left - world.x * nextScale
+    const nextOffsetY = mouseClient.y - rect.top - world.y * nextScale
+    setScale(nextScale)
+    setOffset({ x: nextOffsetX, y: nextOffsetY })
+  }
+
+  function portAnchor(n: Node, portId: string, isOutput: boolean): { x: number; y: number } {
+    const idx = (isOutput ? n.outputPorts : n.inputPorts).findIndex(p => p.id === portId)
+    const baseY = n.y + 32
+    const step = 22
+    const cy = baseY + idx * step
+    const cx = isOutput ? n.x + 160 : n.x
+    return { x: cx, y: cy }
+  }
+
+  function defaultDataForType(type: Node['type']): Node['data'] {
+    switch (type) {
+      case 'ImageClick':
+        return { image: '' }
+      case 'Wait':
+        return { seconds: 1 }
+      case 'If':
+        return { condition: '' }
+      case 'Loop':
+        return { times: 1 }
+      case 'SetVar':
+        return { name: 'var', value: '' }
+      case 'CallFunction':
+        return { functionId: '' }
+      case 'Input':
+      case 'Output':
+        return {}
+      default:
+        return {}
+    }
+  }
+
+  function onDrop(e: React.DragEvent): void {
+    e.preventDefault()
+    const payload = e.dataTransfer.getData('application/json')
+    if (!payload) return
+    let item: { type: Node['type']; label: string; inputs: string[]; outputs: string[] } | null = null
+    try {
+      item = JSON.parse(payload)
+    } catch {}
+    if (!item) return
+    const w = toWorld(e.clientX, e.clientY)
+    const node: Node = {
+      id: uid(),
+      type: item.type,
+      label: item.label,
+      x: w.x,
+      y: w.y,
+      inputPorts: item.inputs.map(n => ({ id: uid(), name: n })),
+      outputPorts: item.outputs.map(n => ({ id: uid(), name: n })),
+      data: defaultDataForType(item.type),
+    }
+    setGraph({ nodes: [...graph.nodes, node], edges: graph.edges })
+  }
+
   const edgesPath = useMemo(() => {
     return graph.edges.map(e => {
       const from = graph.nodes.find(n => n.id === e.fromNodeId)
       const to = graph.nodes.find(n => n.id === e.toNodeId)
       if (!from || !to) return null
-      const x1 = from.x + 160
-      const y1 = from.y + 40
-      const x2 = to.x
-      const y2 = to.y + 40
+      const a1 = portAnchor(from, e.fromPortId, true)
+      const a2 = portAnchor(to, e.toPortId, false)
+      const x1 = a1.x
+      const y1 = a1.y
+      const x2 = a2.x
+      const y2 = a2.y
       const mx = (x1 + x2) / 2
       const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`
       return { id: e.id, d }
@@ -162,16 +253,36 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   }, [graph])
 
   return (
-    <div ref={editorRef} style={{ position: 'relative', width: '100%', height: '100%', background: '#0b1220' }} onMouseDown={onBackgroundMouseDown}>
-      <svg style={{ position: 'absolute', inset: 0 }}>
-        {edgesPath.map(p => (
-          <path key={p.id} d={p.d} stroke="#9ca3af" fill="none" strokeWidth={2} />
+    <div
+      ref={editorRef}
+      style={{ position: 'relative', width: '100%', height: '100%', background: '#0b1220', overflow: 'hidden' }}
+      onMouseDown={onBackgroundMouseDown}
+      onWheel={onWheel}
+      onDragOver={e => e.preventDefault()}
+      onDrop={onDrop}
+    >
+      <div style={{ position: 'absolute', inset: 0, transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
+        <div
+          style={{ position: 'absolute', left: 0, top: 0, width: 5000, height: 5000, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6 }}
+        />
+        <svg style={{ position: 'absolute', left: 0, top: 0, width: 5000, height: 5000 }}>
+          {edgesPath.map(p => (
+            <path key={p.id} d={p.d} stroke="#9ca3af" fill="none" strokeWidth={2} />
+          ))}
+          {connecting && (
+            (() => {
+              const from = graph.nodes.find(n => n.id === connecting.fromNodeId)
+              if (!from) return null
+              const a1 = portAnchor(from, connecting.fromPortId, true)
+              const d = `M ${a1.x} ${a1.y} L ${connecting.x} ${connecting.y}`
+              return <path d={d} stroke="#f59e0b" fill="none" strokeWidth={2} />
+            })()
+          )}
+        </svg>
+        {graph.nodes.map(n => (
+          <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid) => finishConnect(n, pid, e)} />
         ))}
-        {connecting && <path d={`M ${graph.nodes.find(n => n.id === connecting.fromNodeId)?.x! + 160} ${graph.nodes.find(n => n.id === connecting.fromNodeId)?.y! + 40} L ${connecting.x} ${connecting.y}`} stroke="#f59e0b" fill="none" strokeWidth={2} />}
-      </svg>
-      {graph.nodes.map(n => (
-        <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid) => finishConnect(n, pid, e)} />
-      ))}
+      </div>
     </div>
   )
 }

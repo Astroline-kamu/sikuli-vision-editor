@@ -63,13 +63,24 @@ export default function ControlLibrary({ onAddNode }: Props): React.JSX.Element 
   }
 
   return (
-    <div style={{ width: 240, borderRight: '1px solid #1f2937', background: '#0f172a', color: '#e5e7eb', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ fontWeight: 600 }}>控件库</div>
-      {items.map(i => (
-        <button key={i.type} style={{ background: '#1f2937', padding: 8, borderRadius: 6, textAlign: 'left' }} onClick={() => add(i)}>
-          {i.label}
-        </button>
-      ))}
+    <div style={{ width: 240, borderRight: '1px solid #1f2937', background: '#0f172a', color: '#e5e7eb', padding: 12 }}>
+      <div style={{ fontWeight: 600, marginBottom: 8 }}>控件库</div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        {items.map(i => (
+          <div
+            key={i.type}
+            draggable
+            onDragStart={e => {
+              e.dataTransfer.setData('application/json', JSON.stringify(i))
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            onDoubleClick={() => add(i)}
+            style={{ background: '#1f2937', padding: 8, borderRadius: 6, cursor: 'grab', userSelect: 'none', textAlign: 'center', fontSize: 12 }}
+          >
+            {i.label}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
