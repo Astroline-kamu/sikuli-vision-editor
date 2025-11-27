@@ -227,6 +227,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     } else if (selecting) {
       const w = toWorld(e.clientX, e.clientY)
       const rect = { x0: Math.min(selecting.x0, w.x), y0: Math.min(selecting.y0, w.y), x1: Math.max(selecting.x0, w.x), y1: Math.max(selecting.y0, w.y) }
+      const isRight = w.x >= selecting.x0
       setSelecting({ ...selecting, x1: w.x, y1: w.y })
       setGraphLive({
         nodes: graph.nodes.map(n => {
@@ -235,7 +236,8 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
           const nx1 = n.x + 160
           const ny1 = n.y + 80
           const overlap = !(nx1 < rect.x0 || nx0 > rect.x1 || ny1 < rect.y0 || ny0 > rect.y1)
-          return { ...n, selected: overlap }
+          const inside = nx0 >= rect.x0 && nx1 <= rect.x1 && ny0 >= rect.y0 && ny1 <= rect.y1
+          return { ...n, selected: isRight ? overlap : inside }
         }),
         edges: graph.edges,
       })
@@ -656,10 +658,15 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
             const y0 = Math.min(selecting.y0, selecting.y1)
             const w = Math.abs(selecting.x1 - selecting.x0)
             const h = Math.abs(selecting.y1 - selecting.y0)
+            const isRight = selecting.x1 >= selecting.x0
+            const stroke = isRight ? '#10b981' : '#3b82f6'
+            const fill = isRight ? '#10b981' : '#3b82f6'
+            const dash = isRight ? undefined : '4,3'
+            const width = 1.5
             return (
               <>
-                <rect x={x0} y={y0} width={w} height={h} fill="#10b981" opacity={0.18} />
-                <rect x={x0} y={y0} width={w} height={h} fill="none" stroke="#10b981" strokeWidth={2.5} strokeDasharray="4,3" />
+                <rect x={x0} y={y0} width={w} height={h} fill={fill} opacity={0.14} />
+                <rect x={x0} y={y0} width={w} height={h} fill="none" stroke={stroke} strokeWidth={width} strokeDasharray={dash as any} />
               </>
             )
           })()}
