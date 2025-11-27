@@ -250,9 +250,9 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     >
       <div style={{ position: 'absolute', inset: 0, transform: `translate(${camera.offset.x}px, ${camera.offset.y}px) scale(${camera.scale})`, transformOrigin: '0 0' }}>
         <div
-          style={{ position: 'absolute', left: 0, top: 0, width: 5000, height: 5000, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6 }}
+          style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6, pointerEvents: 'none' }}
         />
-        <svg style={{ position: 'absolute', left: 0, top: 0, width: 5000, height: 5000 }}>
+        <svg style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
           {edgesPath.map(p => (
             <path key={p.id} d={p.d} stroke="#9ca3af" fill="none" strokeWidth={2} />
           ))}
