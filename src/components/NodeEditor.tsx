@@ -51,6 +51,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; x: number; y: number } | null>(null)
   const [camera, setCamera] = useState<Camera>({ scale: 1, offset: { x: 0, y: 0 } })
   const panningRef = useRef<{ sx: number; sy: number } | null>(null)
+  const [isPanning, setIsPanning] = useState(false)
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = editorRef.current!.getBoundingClientRect()
@@ -120,9 +121,47 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   }, [graph, onCreateFunction, setGraph])
 
   function onBackgroundMouseDown(e: React.MouseEvent): void {
-    if (e.target === editorRef.current && e.button === 1) {
-      setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+    if (e.button === 1) {
+      e.preventDefault()
+    }
+  }
+
+  function onAuxClick(e: React.MouseEvent): void {
+    e.preventDefault()
+  }
+
+  function onPointerDown(e: React.PointerEvent): void {
+    if (e.button === 1) {
+      e.preventDefault()
+      editorRef.current?.setPointerCapture(e.pointerId)
       panningRef.current = panStart(e.clientX, e.clientY)
+      setIsPanning(true)
+      setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+    }
+  }
+
+  function onPointerMove(e: React.PointerEvent): void {
+    if (panningRef.current) {
+      e.preventDefault()
+      const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
+      panningRef.current = { sx: e.clientX, sy: e.clientY }
+      setCamera({ scale: camera.scale, offset: next })
+    }
+  }
+
+  function onPointerUp(e: React.PointerEvent): void {
+    if (panningRef.current) {
+      editorRef.current?.releasePointerCapture(e.pointerId)
+      panningRef.current = null
+      setIsPanning(false)
+    }
+  }
+
+  function onPointerCancel(e: React.PointerEvent): void {
+    if (panningRef.current) {
+      editorRef.current?.releasePointerCapture(e.pointerId)
+      panningRef.current = null
+      setIsPanning(false)
     }
   }
 
@@ -242,8 +281,19 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   return (
     <div
       ref={editorRef}
-      style={{ position: 'relative', width: '100%', height: '100%', background: '#0b1220', overflow: 'hidden' }}
+      style={{ position: 'relative', width: '100%', height: '100%', background: '#0b1220', overflow: 'hidden', userSelect: 'none', cursor: isPanning ? 'grabbing' : 'default' }}
       onMouseDown={onBackgroundMouseDown}
+      onMouseDownCapture={e => {
+        if (e.button === 1) e.preventDefault()
+      }}
+      onAuxClick={onAuxClick}
+      onAuxClickCapture={e => {
+        e.preventDefault()
+      }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerCancel}
       onWheel={onWheel}
       onDragOver={e => e.preventDefault()}
       onDrop={onDrop}
