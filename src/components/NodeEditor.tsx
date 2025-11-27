@@ -10,6 +10,7 @@ type Props = {
   commitLiveChange: () => void
   onCreateFunction: (def: FunctionDef) => void
   onUpdateFunction: (def: FunctionDef) => void
+  onOpenFunction?: (functionId: string) => void
   functionLibrary: FunctionDef[]
 }
 
@@ -50,7 +51,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted,
   )
 }
 
-export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveChange, commitLiveChange, onCreateFunction, onUpdateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
+export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveChange, commitLiveChange, onCreateFunction, onOpenFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dxw: number; dyw: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; fromIsOutput: boolean; x: number; y: number } | null>(null)
@@ -141,14 +142,15 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     function onKeyDown(e: KeyboardEvent) {
       if (e.ctrlKey && e.key.toLowerCase() === 'g') {
         const selected = graph.nodes.filter(n => n.selected)
-        const hasInput = selected.some(n => n.type === 'Input')
-        if (!hasInput) return
+        const inputNodes = selected.filter(n => n.type === 'Input')
+        const outputNodes = selected.filter(n => n.type === 'Output')
+        if (inputNodes.length === 0 && outputNodes.length === 0) return
         const def: FunctionDef = {
           id: uid(),
           name: 'Func_' + Math.random().toString(36).slice(2, 6),
           graph: { nodes: selected.map(n => ({ ...n, selected: false })), edges: graph.edges.filter(e => selected.find(s => s.id === e.fromNodeId || s.id === e.toNodeId)) },
-          inputs: selected.flatMap(n => (n.type === 'Input' ? n.outputPorts : [])),
-          outputs: selected.flatMap(n => (n.type === 'Output' ? n.inputPorts : [])),
+          inputs: inputNodes.map(n => ({ id: uid(), name: n.label })),
+          outputs: outputNodes.map(n => ({ id: uid(), name: n.label })),
         }
         onCreateFunction(def)
         const fnNode: Node = {
@@ -536,7 +538,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     e.preventDefault()
     const payload = e.dataTransfer.getData('application/json')
     if (!payload) return
-    let item: { type: Node['type']; label: string; inputs: string[]; outputs: string[] } | null = null
+    let item: { type: Node['type']; label: string; inputs: string[]; outputs: string[]; functionId?: string } | null = null
     try {
       item = JSON.parse(payload)
     } catch {}
@@ -550,7 +552,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
       y: w.y,
       inputPorts: item.inputs.map(n => ({ id: uid(), name: n })),
       outputPorts: item.outputs.map(n => ({ id: uid(), name: n })),
-      data: defaultDataForType(item.type),
+      data: item.type === 'CallFunction' && item.functionId ? { functionId: item.functionId } : defaultDataForType(item.type),
     }
     setGraph({ nodes: [...graph.nodes, node], edges: graph.edges })
   }
@@ -576,21 +578,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     setEdgesPaths(paths)
   }, [graph, camera])
 
-  function onNodeDoubleClick(n: Node): void {
-    if (n.type !== 'CallFunction') return
-    const fid = (n.data as any).functionId as string
-    const def = _functionLibrary.find((f: FunctionDef) => f.id === fid)
-    if (!def) return
-    const newName = window.prompt('函数名称', def.name) || def.name
-    const inNames = window.prompt('输入端名称(逗号分隔)', def.inputs.map(p => p.name).join(',')) || def.inputs.map(p => p.name).join(',')
-    const outNames = window.prompt('输出端名称(逗号分隔)', def.outputs.map(p => p.name).join(',')) || def.outputs.map(p => p.name).join(',')
-    const inArr = inNames.split(',').map((s: string) => s.trim()).filter(Boolean)
-    const outArr = outNames.split(',').map((s: string) => s.trim()).filter(Boolean)
-    const newDef: FunctionDef = { ...def, name: newName, inputs: inArr.map((nm: string) => ({ id: Math.random().toString(36).slice(2), name: nm })), outputs: outArr.map((nm: string) => ({ id: Math.random().toString(36).slice(2), name: nm })) }
-    onUpdateFunction(newDef)
-    const newNodes = graph.nodes.map((x: Node) => (x.id === n.id ? { ...x, label: newName, inputPorts: newDef.inputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })), outputPorts: newDef.outputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })) } : x))
-    setGraph({ nodes: newNodes, edges: graph.edges })
-  }
+  
 
   return (
     <div
@@ -667,7 +655,20 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
           )}
         </svg>
         {graph.nodes.map(n => (
-          <NodeView key={n.id} n={n} highlighted={eraseHits.nodes.has(n.id)} onMouseDown={e => startDragNode(n, e)} onDoubleClick={() => onNodeDoubleClick(n)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
+          <NodeView
+            key={n.id}
+            n={n}
+            highlighted={eraseHits.nodes.has(n.id)}
+            onMouseDown={e => startDragNode(n, e)}
+            onDoubleClick={() => {
+              if (n.type === 'CallFunction' && onOpenFunction) {
+                const fid = (n.data as any).functionId as string
+                if (fid) onOpenFunction(fid)
+              }
+            }}
+            onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)}
+            onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)}
+          />
         ))}
         <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1000, overflow: 'visible' }}>
           {selecting && (() => {

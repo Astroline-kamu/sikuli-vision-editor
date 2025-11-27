@@ -3,6 +3,7 @@ import "./App.css";
 import NodeEditor from "./components/NodeEditor";
 import ControlLibrary from "./components/ControlLibrary";
 import ImageLibrary from "./components/ImageLibrary";
+import FunctionEditor from "./components/FunctionEditor";
 import { FunctionDef, Graph, Node } from "./types/graph";
 import { graphToPython } from "./lib/codegen/python";
 import { pythonToGraph } from "./lib/parser/python";
@@ -11,6 +12,7 @@ function App(): React.JSX.Element {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [images, setImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [functions, setFunctions] = useState<FunctionDef[]>([]);
+  const [editingFunction, setEditingFunction] = useState<FunctionDef | null>(null);
   const pastRef = useRef<Graph[]>([]);
   const futureRef = useRef<Graph[]>([]);
 
@@ -58,6 +60,49 @@ function App(): React.JSX.Element {
 
   function onCreateFunction(def: FunctionDef): void {
     setFunctions([...functions, def]);
+  }
+
+  function openFunctionEditor(functionId: string): void {
+    const def = functions.find(f => f.id === functionId) || null;
+    if (def) setEditingFunction(def);
+  }
+
+  function saveFunction(updated: FunctionDef): void {
+    setFunctions(functions.map(f => (f.id === updated.id ? updated : f)));
+    // Update referencing CallFunction nodes in the main graph: remap ports by index
+    const nextNodes = graph.nodes.map(n => {
+      if (n.type === "CallFunction" && (n.data as any)?.functionId === updated.id) {
+        const newInputs = updated.inputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name }));
+        const newOutputs = updated.outputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name }));
+        return { ...n, label: updated.name, inputPorts: newInputs, outputPorts: newOutputs };
+      }
+      return n;
+    });
+    let nextEdges = graph.edges.map(ed => {
+      const fromNode = nextNodes.find(n => n.id === ed.fromNodeId);
+      const toNode = nextNodes.find(n => n.id === ed.toNodeId);
+      if (fromNode?.type === "CallFunction" && (fromNode.data as any)?.functionId === updated.id) {
+        const oldFrom = graph.nodes.find(n => n.id === fromNode.id)!;
+        const idx = oldFrom.outputPorts.findIndex(p => p.id === ed.fromPortId);
+        if (idx >= 0 && idx < updated.outputs.length) {
+          ed = { ...ed, fromPortId: nextNodes.find(n => n.id === fromNode.id)!.outputPorts[idx].id };
+        } else {
+          return null as any;
+        }
+      }
+      if (toNode?.type === "CallFunction" && (toNode.data as any)?.functionId === updated.id) {
+        const oldTo = graph.nodes.find(n => n.id === toNode.id)!;
+        const idx = oldTo.inputPorts.findIndex(p => p.id === ed.toPortId);
+        if (idx >= 0 && idx < updated.inputs.length) {
+          ed = { ...ed, toPortId: nextNodes.find(n => n.id === toNode.id)!.inputPorts[idx].id };
+        } else {
+          return null as any;
+        }
+      }
+      return ed;
+    }).filter(Boolean) as typeof graph.edges;
+    applyGraph({ nodes: nextNodes, edges: nextEdges });
+    setEditingFunction(null);
   }
 
   function exportPy(): void {
@@ -109,8 +154,12 @@ function App(): React.JSX.Element {
         onUpdateFunction={(updated) => {
           setFunctions(functions.map(f => (f.id === updated.id ? updated : f)));
         }}
+        onOpenFunction={openFunctionEditor}
         functionLibrary={functions}
       />
+      {editingFunction && (
+        <FunctionEditor def={editingFunction} onSave={saveFunction} onClose={() => setEditingFunction(null)} />
+      )}
       <ImageLibrary images={images} onAddImage={(i) => setImages([...images, i])} />
     </div>
   );
