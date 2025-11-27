@@ -15,11 +15,11 @@ function uid(): string {
 
 //
 
-function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void }): React.JSX.Element {
+function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; highlighted: boolean }): React.JSX.Element {
   const selected = n.selected
   return (
     <div
-      style={{ position: 'absolute', left: n.x, top: n.y, width: 160, height: 80, border: '2px solid ' + (selected ? '#3b82f6' : '#555'), borderRadius: 8, background: '#1f2937', color: '#fff', userSelect: 'none' }}
+      style={{ position: 'absolute', left: n.x, top: n.y, width: 160, height: 80, border: '2px solid ' + (highlighted ? '#ef4444' : selected ? '#3b82f6' : '#555'), borderRadius: 8, background: '#1f2937', color: '#fff', userSelect: 'none' }}
       onMouseDown={onMouseDown}
     >
       <div style={{ padding: 8, fontWeight: 600, fontSize: 12 }}>{n.label}</div>
@@ -52,7 +52,14 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   const [camera, setCamera] = useState<Camera>({ scale: 1, offset: { x: 0, y: 0 } })
   const panningRef = useRef<{ sx: number; sy: number } | null>(null)
   const [isPanning, setIsPanning] = useState(false)
+  const [isErasing, setIsErasing] = useState(false)
+  const [erasePath, setErasePath] = useState<{ x: number; y: number }[]>([])
+  const [eraseHits, setEraseHits] = useState<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() })
   const [snapTarget, setSnapTarget] = useState<{ nodeId: string; portId: string; isOutput: boolean } | null>(null)
+  const [fadePath, setFadePath] = useState<{ x: number; y: number }[] | null>(null)
+  const [fadeOpacity, setFadeOpacity] = useState(0)
+  const [fadeWidth, setFadeWidth] = useState(0)
+  const fadeTimerRef = useRef<number | null>(null)
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = editorRef.current!.getBoundingClientRect()
@@ -71,6 +78,10 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         const w = toWorld(e.clientX, e.clientY)
         setConnecting({ ...connecting, x: w.x, y: w.y })
         setSnapTarget(nearestPort(w.x, w.y, 24))
+      } else if (isErasing) {
+        const w = toWorld(e.clientX, e.clientY)
+        setErasePath(prev => [...prev, w])
+        hitTestEraseAtPoint(w)
       } else if (panningRef.current) {
         const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
         panningRef.current = { sx: e.clientX, sy: e.clientY }
@@ -81,6 +92,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       draggingRef.current = null
       setConnecting(null)
       panningRef.current = null
+      setIsErasing(false)
     }
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
@@ -139,11 +151,22 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       panningRef.current = panStart(e.clientX, e.clientY)
       setIsPanning(true)
       setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+    } else if (e.button === 2) {
+      e.preventDefault()
+      editorRef.current?.setPointerCapture(e.pointerId)
+      setIsErasing(true)
+      setErasePath([])
+      setEraseHits({ nodes: new Set(), edges: new Set() })
     }
   }
 
   function onPointerMove(e: React.PointerEvent): void {
-    if (panningRef.current) {
+    if (isErasing) {
+      e.preventDefault()
+      const w = toWorld(e.clientX, e.clientY)
+      setErasePath(prev => [...prev, w])
+      hitTestEraseAtPoint(w)
+    } else if (panningRef.current) {
       e.preventDefault()
       const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
       panningRef.current = { sx: e.clientX, sy: e.clientY }
@@ -167,6 +190,37 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       }
       setSnapTarget(null)
     }
+    if (isErasing) {
+      editorRef.current?.releasePointerCapture(e.pointerId)
+      setIsErasing(false)
+      const removedNodes = new Set(eraseHits.nodes)
+      const removedEdges = new Set(eraseHits.edges)
+      const nextNodes = graph.nodes.filter(n => !removedNodes.has(n.id))
+      const nextEdges = graph.edges.filter(ed => !removedEdges.has(ed.id) && !removedNodes.has(ed.fromNodeId) && !removedNodes.has(ed.toNodeId))
+      setGraph({ nodes: nextNodes, edges: nextEdges })
+      setFadePath(erasePath)
+      setFadeOpacity(0.3)
+      setFadeWidth(Math.max(2, 8 / camera.scale))
+      if (fadeTimerRef.current) window.clearInterval(fadeTimerRef.current)
+      fadeTimerRef.current = window.setInterval(() => {
+        setFadeOpacity(prev => {
+          const v = prev - 0.06
+          return v <= 0 ? 0 : v
+        })
+        setFadeWidth(prev => {
+          const v = prev - 0.5
+          return v <= 0 ? 0 : v
+        })
+      }, 20)
+      window.setTimeout(() => {
+        if (fadeTimerRef.current) window.clearInterval(fadeTimerRef.current)
+        setFadePath(null)
+        setFadeOpacity(0)
+        setFadeWidth(0)
+      }, 220)
+      setErasePath([])
+      setEraseHits({ nodes: new Set(), edges: new Set() })
+    }
   }
 
   function onPointerCancel(e: React.PointerEvent): void {
@@ -174,6 +228,12 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       editorRef.current?.releasePointerCapture(e.pointerId)
       panningRef.current = null
       setIsPanning(false)
+    }
+    if (isErasing) {
+      editorRef.current?.releasePointerCapture(e.pointerId)
+      setIsErasing(false)
+      setErasePath([])
+      setEraseHits({ nodes: new Set(), edges: new Set() })
     }
   }
 
@@ -252,6 +312,77 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     const thresholdWorld = pixelRadius / camera.scale
     if (best && bestD <= thresholdWorld) return best
     return null
+  }
+
+  function pointRectDistance(px: number, py: number, x: number, y: number, w: number, h: number): number {
+    const dx = Math.max(x - px, 0, px - (x + w))
+    const dy = Math.max(y - py, 0, py - (y + h))
+    return Math.hypot(dx, dy)
+  }
+
+  function pointSegmentDistance(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+    const dx = x2 - x1
+    const dy = y2 - y1
+    const len2 = dx * dx + dy * dy
+    if (len2 === 0) return Math.hypot(px - x1, py - y1)
+    let t = ((px - x1) * dx + (py - y1) * dy) / len2
+    t = Math.max(0, Math.min(1, t))
+    const sx = x1 + t * dx
+    const sy = y1 + t * dy
+    return Math.hypot(px - sx, py - sy)
+  }
+
+  function sampleEdge(e: Edge, steps = 32): { x: number; y: number }[] {
+    const from = graph.nodes.find(n => n.id === e.fromNodeId)
+    const to = graph.nodes.find(n => n.id === e.toNodeId)
+    if (!from || !to) return []
+    const a1 = portAnchor(from, e.fromPortId, true)
+    const a2 = portAnchor(to, e.toPortId, false)
+    const x1 = a1.x
+    const y1 = a1.y
+    const x2 = a2.x
+    const y2 = a2.y
+    const mx = (x1 + x2) / 2
+    const pts: { x: number; y: number }[] = []
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps
+      const ax = x1 + (mx - x1) * t
+      const ay = y1 + (y1 - y1) * t
+      const bx = mx + (mx - mx) * t
+      const by = y1 + (y2 - y1) * t
+      const cx = mx + (x2 - mx) * t
+      const cy = y2 + (y2 - y2) * t
+      const dx1 = ax + (bx - ax) * t
+      const dy1 = ay + (by - ay) * t
+      const dx2 = bx + (cx - bx) * t
+      const dy2 = by + (cy - by) * t
+      const x = dx1 + (dx2 - dx1) * t
+      const y = dy1 + (dy2 - dy1) * t
+      pts.push({ x, y })
+    }
+    return pts
+  }
+
+  function hitTestEraseAtPoint(p: { x: number; y: number }): void {
+    const R = 24 / camera.scale
+    const nodeHits = new Set(eraseHits.nodes)
+    const edgeHits = new Set(eraseHits.edges)
+    graph.nodes.forEach(n => {
+      const d = pointRectDistance(p.x, p.y, n.x, n.y, 160, 80)
+      if (d <= R) nodeHits.add(n.id)
+    })
+    graph.edges.forEach(e => {
+      const pts = sampleEdge(e, 24)
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1]
+        const b = pts[i]
+        if (pointSegmentDistance(p.x, p.y, a.x, a.y, b.x, b.y) <= R) {
+          edgeHits.add(e.id)
+          break
+        }
+      }
+    })
+    setEraseHits({ nodes: nodeHits, edges: edgeHits })
   }
 
   function onWheel(e: React.WheelEvent): void {
@@ -358,6 +489,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       onPointerCancel={onPointerCancel}
       onWheel={onWheel}
       onDragOver={e => e.preventDefault()}
+      onContextMenu={e => e.preventDefault()}
       onDrop={onDrop}
     >
       <div style={{ position: 'absolute', inset: 0, transform: `translate(${camera.offset.x}px, ${camera.offset.y}px) scale(${camera.scale})`, transformOrigin: '0 0' }}>
@@ -366,7 +498,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         />
         <svg style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
           {edgesPath.map(p => (
-            <path key={p.id} d={p.d} stroke="#9ca3af" fill="none" strokeWidth={2} />
+            <path key={p.id} d={p.d} stroke={eraseHits.edges.has(p.id) ? '#ef4444' : '#9ca3af'} fill="none" strokeWidth={2} />
           ))}
           {connecting && (() => {
             const from = graph.nodes.find(n => n.id === connecting.fromNodeId)
@@ -395,9 +527,21 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
               </>
             )
           })()}
+          {isErasing && erasePath.length > 1 && (
+            (() => {
+              const d = `M ${erasePath[0].x} ${erasePath[0].y} ` + erasePath.slice(1).map(pt => `L ${pt.x} ${pt.y}`).join(' ')
+              return <path d={d} stroke="#e5e7eb" fill="none" strokeWidth={Math.max(2, 8 / camera.scale)} opacity={0.35} />
+            })()
+          )}
+          {fadePath && fadePath.length > 1 && (
+            (() => {
+              const d = `M ${fadePath[0].x} ${fadePath[0].y} ` + fadePath.slice(1).map(pt => `L ${pt.x} ${pt.y}`).join(' ')
+              return <path d={d} stroke="#e5e7eb" fill="none" strokeWidth={fadeWidth} opacity={fadeOpacity} />
+            })()
+          )}
         </svg>
         {graph.nodes.map(n => (
-          <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
+          <NodeView key={n.id} n={n} highlighted={eraseHits.nodes.has(n.id)} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
         ))}
       </div>
     </div>
