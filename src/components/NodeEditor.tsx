@@ -60,6 +60,8 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   const [fadeOpacity, setFadeOpacity] = useState(0)
   const [fadeWidth, setFadeWidth] = useState(0)
   const fadeTimerRef = useRef<number | null>(null)
+  const [eraseCanceled, setEraseCanceled] = useState(false)
+  const cancelRef = useRef<HTMLDivElement>(null)
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = editorRef.current!.getBoundingClientRect()
@@ -101,6 +103,18 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       window.removeEventListener('mouseup', onMouseUp)
     }
   }, [graph, connecting, setGraph])
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && isErasing) {
+        e.preventDefault()
+        setEraseCanceled(true)
+        setEraseHits({ nodes: new Set(), edges: new Set() })
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isErasing])
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -153,9 +167,17 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
     } else if (e.button === 2) {
       e.preventDefault()
+      const w = toWorld(e.clientX, e.clientY)
+      const overNode = graph.nodes.some(n => w.x >= n.x && w.x <= n.x + 160 && w.y >= n.y && w.y <= n.y + 80)
+      if (overNode) return
       editorRef.current?.setPointerCapture(e.pointerId)
       setIsErasing(true)
-      setErasePath([])
+      setEraseCanceled(false)
+      setErasePath([w])
+      setEraseHits({ nodes: new Set(), edges: new Set() })
+    } else if (e.button === 0 && isErasing) {
+      e.preventDefault()
+      setEraseCanceled(true)
       setEraseHits({ nodes: new Set(), edges: new Set() })
     }
   }
@@ -166,6 +188,13 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       const w = toWorld(e.clientX, e.clientY)
       setErasePath(prev => [...prev, w])
       hitTestEraseAtPoint(w)
+      const el = cancelRef.current
+      if (el) {
+        const r = el.getBoundingClientRect()
+        if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) {
+          setEraseHits({ nodes: new Set(), edges: new Set() })
+        }
+      }
     } else if (panningRef.current) {
       e.preventDefault()
       const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
@@ -193,13 +222,22 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     if (isErasing) {
       editorRef.current?.releasePointerCapture(e.pointerId)
       setIsErasing(false)
-      const removedNodes = new Set(eraseHits.nodes)
-      const removedEdges = new Set(eraseHits.edges)
-      const nextNodes = graph.nodes.filter(n => !removedNodes.has(n.id))
-      const nextEdges = graph.edges.filter(ed => !removedEdges.has(ed.id) && !removedNodes.has(ed.fromNodeId) && !removedNodes.has(ed.toNodeId))
-      setGraph({ nodes: nextNodes, edges: nextEdges })
+      const cancelByArea = (() => {
+        const el = cancelRef.current
+        if (!el) return false
+        const r = el.getBoundingClientRect()
+        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom
+      })()
+      const shouldCancel = eraseCanceled || cancelByArea
+      if (!shouldCancel) {
+        const removedNodes = new Set(eraseHits.nodes)
+        const removedEdges = new Set(eraseHits.edges)
+        const nextNodes = graph.nodes.filter(n => !removedNodes.has(n.id))
+        const nextEdges = graph.edges.filter(ed => !removedEdges.has(ed.id) && !removedNodes.has(ed.fromNodeId) && !removedNodes.has(ed.toNodeId))
+        setGraph({ nodes: nextNodes, edges: nextEdges })
+      }
       setFadePath(erasePath)
-      setFadeOpacity(0.3)
+      setFadeOpacity(0.35)
       setFadeWidth(Math.max(2, 8 / camera.scale))
       if (fadeTimerRef.current) window.clearInterval(fadeTimerRef.current)
       fadeTimerRef.current = window.setInterval(() => {
@@ -218,6 +256,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         setFadeOpacity(0)
         setFadeWidth(0)
       }, 220)
+      setEraseCanceled(false)
       setErasePath([])
       setEraseHits({ nodes: new Set(), edges: new Set() })
     }
@@ -492,6 +531,11 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       onContextMenu={e => e.preventDefault()}
       onDrop={onDrop}
     >
+      {isErasing && (
+        <div ref={cancelRef} style={{ position: 'absolute', right: 12, top: 12, zIndex: 1, background: '#111827', color: '#fca5a5', border: '1px solid #fca5a5', padding: '6px 10px', borderRadius: 6, fontSize: 12 }}>
+          取消区域
+        </div>
+      )}
       <div style={{ position: 'absolute', inset: 0, transform: `translate(${camera.offset.x}px, ${camera.offset.y}px) scale(${camera.scale})`, transformOrigin: '0 0' }}>
         <div
           style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6, pointerEvents: 'none' }}
