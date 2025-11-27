@@ -1,50 +1,62 @@
 import { useState } from "react";
-import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
+import NodeEditor from "./components/NodeEditor";
+import ControlLibrary from "./components/ControlLibrary";
+import ImageLibrary from "./components/ImageLibrary";
+import { FunctionDef, Graph, Node } from "./types/graph";
+import { graphToPython } from "./lib/codegen/python";
+import { pythonToGraph } from "./lib/parser/python";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
+  const [images, setImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
+  const [functions, setFunctions] = useState<FunctionDef[]>([]);
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    setGreetMsg(await invoke("greet", { name }));
+  function onAddNode(n: Node) {
+    setGraph({ nodes: [...graph.nodes, n], edges: graph.edges });
+  }
+
+  function onCreateFunction(def: FunctionDef) {
+    setFunctions([...functions, def]);
+  }
+
+  function exportPy() {
+    const code = graphToPython(graph);
+    const blob = new Blob([code], { type: "text/x-python" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "script.py";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importPy(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const code = String(reader.result);
+      const g = pythonToGraph(code);
+      setGraph(g);
+    };
+    reader.readAsText(f);
   }
 
   return (
-    <main className="container">
-      <h1>Welcome to Tauri + React</h1>
-
-      <div className="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/vite.svg" className="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img src="/tauri.svg" className="logo tauri" alt="Tauri logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
+    <div style={{ display: "grid", gridTemplateColumns: "240px 1fr 240px", gridTemplateRows: "48px 1fr", height: "100vh" }}>
+      <div style={{ gridColumn: "1 / -1", gridRow: "1", display: "flex", alignItems: "center", gap: 8, padding: "0 12px", background: "#0b1220", color: "#e5e7eb", borderBottom: "1px solid #1f2937" }}>
+        <div style={{ fontWeight: 700 }}>Sikuli 挂件</div>
+        <button onClick={exportPy} style={{ marginLeft: 12 }}>导出 Python</button>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <input type="file" accept=".py" onChange={importPy} />
+          导入 Python
+        </label>
       </div>
-      <p>Click on the Tauri, Vite, and React logos to learn more.</p>
-
-      <form
-        className="row"
-        onSubmit={(e) => {
-          e.preventDefault();
-          greet();
-        }}
-      >
-        <input
-          id="greet-input"
-          onChange={(e) => setName(e.currentTarget.value)}
-          placeholder="Enter a name..."
-        />
-        <button type="submit">Greet</button>
-      </form>
-      <p>{greetMsg}</p>
-    </main>
+      <ControlLibrary onAddNode={onAddNode} />
+      <NodeEditor graph={graph} setGraph={setGraph} onCreateFunction={onCreateFunction} functionLibrary={functions} />
+      <ImageLibrary images={images} onAddImage={(i) => setImages([...images, i])} />
+    </div>
   );
 }
 
