@@ -62,6 +62,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
   const [eraseHits, setEraseHits] = useState<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() })
   const [snapTarget, setSnapTarget] = useState<{ nodeId: string; portId: string; isOutput: boolean } | null>(null)
   const [selecting, setSelecting] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  const groupDragRef = useRef<{ startX: number; startY: number; items: { id: string; x: number; y: number }[] } | null>(null)
   const [fadePath, setFadePath] = useState<{ x: number; y: number }[] | null>(null)
   const [fadeOpacity, setFadeOpacity] = useState(0)
   const [fadeWidth, setFadeWidth] = useState(0)
@@ -77,11 +78,21 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
   useEffect(() => {
     function onMouseMove(e: MouseEvent): void {
       if (draggingRef.current) {
-        const { id, dxw, dyw } = draggingRef.current
         const w = toWorld(e.clientX, e.clientY)
-        const nx = w.x - dxw
-        const ny = w.y - dyw
-        setGraphLive({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)), edges: graph.edges })
+        if (groupDragRef.current) {
+          const dx = w.x - groupDragRef.current.startX
+          const dy = w.y - groupDragRef.current.startY
+          const itemsMap = new Map(groupDragRef.current.items.map(it => [it.id, it]))
+          setGraphLive({
+            nodes: graph.nodes.map(n => (n.selected ? { ...n, x: itemsMap.get(n.id)!.x + dx, y: itemsMap.get(n.id)!.y + dy } : n)),
+            edges: graph.edges,
+          })
+        } else {
+          const { id, dxw, dyw } = draggingRef.current
+          const nx = w.x - dxw
+          const ny = w.y - dyw
+          setGraphLive({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)), edges: graph.edges })
+        }
       } else if (connecting) {
         const w = toWorld(e.clientX, e.clientY)
         setConnecting({ ...connecting, x: w.x, y: w.y })
@@ -101,6 +112,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
         commitLiveChange()
       }
       draggingRef.current = null
+      groupDragRef.current = null
       setConnecting(null)
       panningRef.current = null
       setIsErasing(false)
@@ -326,7 +338,12 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     const dyw = world.y - n.y
     draggingRef.current = { id: n.id, dxw, dyw }
     beginLiveChange()
-    setGraphLive({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
+    const willSelect = graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : x))
+    setGraphLive({ nodes: willSelect, edges: graph.edges })
+    const selectedItems = graph.nodes
+      .map(x => (x.id === n.id ? { ...x, selected: true } : x))
+      .filter(x => x.selected)
+    groupDragRef.current = { startX: world.x, startY: world.y, items: selectedItems.map(x => ({ id: x.id, x: x.x, y: x.y })) }
   }
 
   function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
