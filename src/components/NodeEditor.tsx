@@ -9,6 +9,7 @@ type Props = {
   beginLiveChange: () => void
   commitLiveChange: () => void
   onCreateFunction: (def: FunctionDef) => void
+  onUpdateFunction: (def: FunctionDef) => void
   functionLibrary: FunctionDef[]
 }
 
@@ -18,12 +19,13 @@ function uid(): string {
 
 //
 
-function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; highlighted: boolean }): React.JSX.Element {
+function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted, onDoubleClick }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; highlighted: boolean; onDoubleClick: (e: React.MouseEvent) => void }): React.JSX.Element {
   const selected = n.selected
   return (
     <div
       style={{ position: 'absolute', left: n.x, top: n.y, width: 160, height: 80, border: '2px solid ' + (highlighted ? '#ef4444' : selected ? '#3b82f6' : '#555'), borderRadius: 8, background: '#1f2937', color: '#fff', userSelect: 'none' }}
       onMouseDown={onMouseDown}
+      onDoubleClick={onDoubleClick}
     >
       <div style={{ padding: 8, fontWeight: 600, fontSize: 12 }}>{n.label}</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 4, padding: 8 }}>
@@ -48,7 +50,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted 
   )
 }
 
-export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveChange, commitLiveChange, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
+export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveChange, commitLiveChange, onCreateFunction, onUpdateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dxw: number; dyw: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; fromIsOutput: boolean; x: number; y: number } | null>(null)
@@ -59,6 +61,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
   const [erasePath, setErasePath] = useState<{ x: number; y: number }[]>([])
   const [eraseHits, setEraseHits] = useState<{ nodes: Set<string>; edges: Set<string> }>({ nodes: new Set(), edges: new Set() })
   const [snapTarget, setSnapTarget] = useState<{ nodeId: string; portId: string; isOutput: boolean } | null>(null)
+  const [selecting, setSelecting] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
   const [fadePath, setFadePath] = useState<{ x: number; y: number }[] | null>(null)
   const [fadeOpacity, setFadeOpacity] = useState(0)
   const [fadeWidth, setFadeWidth] = useState(0)
@@ -124,7 +127,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (e.key.toLowerCase() === 'g') {
+      if (e.ctrlKey && e.key.toLowerCase() === 'g') {
         const selected = graph.nodes.filter(n => n.selected)
         const hasInput = selected.some(n => n.type === 'Input')
         if (!hasInput) return
@@ -158,6 +161,14 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     if (e.button === 1) {
       e.preventDefault()
     }
+    if (e.button === 0) {
+      const w = toWorld(e.clientX, e.clientY)
+      const overNode = graph.nodes.some(n => w.x >= n.x && w.x <= n.x + 160 && w.y >= n.y && w.y <= n.y + 80)
+      if (!overNode) {
+        setSelecting({ x0: w.x, y0: w.y, x1: w.x, y1: w.y })
+        setGraphLive({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+      }
+    }
   }
 
   function onAuxClick(e: React.MouseEvent): void {
@@ -181,6 +192,13 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
       setEraseCanceled(false)
       setErasePath([w])
       setEraseHits({ nodes: new Set(), edges: new Set() })
+    } else if (e.button === 0) {
+      const w = toWorld(e.clientX, e.clientY)
+      const overNode = graph.nodes.some(n => w.x >= n.x && w.x <= n.x + 160 && w.y >= n.y && w.y <= n.y + 80)
+      if (!overNode) {
+        setSelecting({ x0: w.x, y0: w.y, x1: w.x, y1: w.y })
+        setGraphLive({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
+      }
     } else if (e.button === 0 && isErasing) {
       e.preventDefault()
       setEraseCanceled(true)
@@ -206,6 +224,21 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
       const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
       panningRef.current = { sx: e.clientX, sy: e.clientY }
       setCamera({ scale: camera.scale, offset: next })
+    } else if (selecting) {
+      const w = toWorld(e.clientX, e.clientY)
+      const rect = { x0: Math.min(selecting.x0, w.x), y0: Math.min(selecting.y0, w.y), x1: Math.max(selecting.x0, w.x), y1: Math.max(selecting.y0, w.y) }
+      setSelecting({ ...selecting, x1: w.x, y1: w.y })
+      setGraphLive({
+        nodes: graph.nodes.map(n => {
+          const nx0 = n.x
+          const ny0 = n.y
+          const nx1 = n.x + 160
+          const ny1 = n.y + 80
+          const overlap = !(nx1 < rect.x0 || nx0 > rect.x1 || ny1 < rect.y0 || ny0 > rect.y1)
+          return { ...n, selected: overlap }
+        }),
+        edges: graph.edges,
+      })
     }
   }
 
@@ -265,6 +298,9 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
       setEraseCanceled(false)
       setErasePath([])
       setEraseHits({ nodes: new Set(), edges: new Set() })
+    }
+    if (selecting) {
+      setSelecting(null)
     }
   }
 
@@ -521,6 +557,22 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     setEdgesPaths(paths)
   }, [graph, camera])
 
+  function onNodeDoubleClick(n: Node): void {
+    if (n.type !== 'CallFunction') return
+    const fid = (n.data as any).functionId as string
+    const def = _functionLibrary.find((f: FunctionDef) => f.id === fid)
+    if (!def) return
+    const newName = window.prompt('函数名称', def.name) || def.name
+    const inNames = window.prompt('输入端名称(逗号分隔)', def.inputs.map(p => p.name).join(',')) || def.inputs.map(p => p.name).join(',')
+    const outNames = window.prompt('输出端名称(逗号分隔)', def.outputs.map(p => p.name).join(',')) || def.outputs.map(p => p.name).join(',')
+    const inArr = inNames.split(',').map((s: string) => s.trim()).filter(Boolean)
+    const outArr = outNames.split(',').map((s: string) => s.trim()).filter(Boolean)
+    const newDef: FunctionDef = { ...def, name: newName, inputs: inArr.map((nm: string) => ({ id: Math.random().toString(36).slice(2), name: nm })), outputs: outArr.map((nm: string) => ({ id: Math.random().toString(36).slice(2), name: nm })) }
+    onUpdateFunction(newDef)
+    const newNodes = graph.nodes.map((x: Node) => (x.id === n.id ? { ...x, label: newName, inputPorts: newDef.inputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })), outputPorts: newDef.outputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })) } : x))
+    setGraph({ nodes: newNodes, edges: graph.edges })
+  }
+
   return (
     <div
       ref={editorRef}
@@ -596,8 +648,22 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
           )}
         </svg>
         {graph.nodes.map(n => (
-          <NodeView key={n.id} n={n} highlighted={eraseHits.nodes.has(n.id)} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
+          <NodeView key={n.id} n={n} highlighted={eraseHits.nodes.has(n.id)} onMouseDown={e => startDragNode(n, e)} onDoubleClick={() => onNodeDoubleClick(n)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
         ))}
+        <svg style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 1000, overflow: 'visible' }}>
+          {selecting && (() => {
+            const x0 = Math.min(selecting.x0, selecting.x1)
+            const y0 = Math.min(selecting.y0, selecting.y1)
+            const w = Math.abs(selecting.x1 - selecting.x0)
+            const h = Math.abs(selecting.y1 - selecting.y0)
+            return (
+              <>
+                <rect x={x0} y={y0} width={w} height={h} fill="#10b981" opacity={0.18} />
+                <rect x={x0} y={y0} width={w} height={h} fill="none" stroke="#10b981" strokeWidth={2.5} strokeDasharray="4,3" />
+              </>
+            )
+          })()}
+        </svg>
       </div>
     </div>
   )

@@ -1,15 +1,16 @@
 import React from 'react'
-import { Node, NodeType } from '../types/graph'
+import { FunctionDef, Node, NodeType } from '../types/graph'
 
 type Props = {
   onAddNode: (n: Node) => void
+  functions?: FunctionDef[]
 }
 
 function uid() {
   return Math.random().toString(36).slice(2)
 }
 
-export default function ControlLibrary({ onAddNode }: Props): React.JSX.Element {
+export default function ControlLibrary({ onAddNode, functions = [] }: Props): React.JSX.Element {
   const items: ReadonlyArray<{ type: NodeType; label: string; inputs: string[]; outputs: string[] }> = [
     { type: 'Input', label: 'Input', inputs: [], outputs: ['out'] },
     { type: 'Output', label: 'Output', inputs: ['in'], outputs: [] },
@@ -78,6 +79,33 @@ export default function ControlLibrary({ onAddNode }: Props): React.JSX.Element 
             style={{ background: '#1f2937', padding: 8, borderRadius: 6, cursor: 'grab', userSelect: 'none', textAlign: 'center', fontSize: 12 }}
           >
             {i.label}
+          </div>
+        ))}
+        {functions.map(def => (
+          <div
+            key={def.id}
+            draggable
+            onDragStart={e => {
+              const item = { type: 'CallFunction' as NodeType, label: def.name, inputs: def.inputs.map(p => p.name), outputs: def.outputs.map(p => p.name), functionId: def.id }
+              e.dataTransfer.setData('application/json', JSON.stringify(item))
+              e.dataTransfer.effectAllowed = 'copy'
+            }}
+            onDoubleClick={() => {
+              const node: Node = {
+                id: Math.random().toString(36).slice(2),
+                type: 'CallFunction',
+                label: def.name,
+                x: 40,
+                y: 40,
+                inputPorts: def.inputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })),
+                outputPorts: def.outputs.map(p => ({ id: Math.random().toString(36).slice(2), name: p.name })),
+                data: { functionId: def.id },
+              }
+              onAddNode(node)
+            }}
+            style={{ background: '#1f2937', padding: 8, borderRadius: 6, cursor: 'grab', userSelect: 'none', textAlign: 'center', fontSize: 12 }}
+          >
+            {def.name}
           </div>
         ))}
       </div>

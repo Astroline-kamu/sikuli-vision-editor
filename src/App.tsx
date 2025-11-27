@@ -93,7 +93,7 @@ function App(): React.JSX.Element {
           导入 Python
         </label>
       </div>
-      <ControlLibrary onAddNode={onAddNode} />
+      <ControlLibrary onAddNode={onAddNode} functions={functions} />
       <NodeEditor
         graph={graph}
         setGraph={applyGraph}
@@ -106,6 +106,9 @@ function App(): React.JSX.Element {
           /* No-op: past already recorded at begin; current graph contains end */
         }}
         onCreateFunction={onCreateFunction}
+        onUpdateFunction={(updated) => {
+          setFunctions(functions.map(f => (f.id === updated.id ? updated : f)));
+        }}
         functionLibrary={functions}
       />
       <ImageLibrary images={images} onAddImage={(i) => setImages([...images, i])} />
