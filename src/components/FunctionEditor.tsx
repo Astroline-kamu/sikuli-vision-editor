@@ -1,25 +1,25 @@
 import React, { useMemo, useState } from 'react'
 import NodeEditor from './NodeEditor'
-import { FunctionDef, Graph } from '../types/graph'
+import { FunctionDef, Graph, Node } from '../types/graph'
+import ControlLibrary from './ControlLibrary'
 
 type Props = {
   def: FunctionDef
   onSave: (updated: FunctionDef) => void
   onClose: () => void
+  functions: FunctionDef[]
 }
 
-export default function FunctionEditor({ def, onSave, onClose }: Props): React.JSX.Element {
-  const [name, setName] = useState(def.name)
-  const [funcGraph, setFuncGraph] = useState<Graph>({ nodes: def.graph.nodes, edges: def.graph.edges })
+export default function FunctionEditor({ def, onSave, onClose, functions }: Props): React.JSX.Element {
+  const [currentDef, setCurrentDef] = useState<FunctionDef>(def)
+  const [name, setName] = useState(currentDef.name)
+  const [funcGraph, setFuncGraph] = useState<Graph>({ nodes: currentDef.graph.nodes, edges: currentDef.graph.edges })
   const inputNodes = useMemo(() => funcGraph.nodes.filter(n => n.type === 'Input'), [funcGraph])
   const outputNodes = useMemo(() => funcGraph.nodes.filter(n => n.type === 'Output'), [funcGraph])
 
-  function renameNode(id: string, label: string) {
-    setFuncGraph({ nodes: funcGraph.nodes.map(n => (n.id === id ? { ...n, label } : n)), edges: funcGraph.edges })
-  }
   function save() {
     const updated: FunctionDef = {
-      ...def,
+      ...currentDef,
       name,
       inputs: inputNodes.map(n => ({ id: Math.random().toString(36).slice(2), name: n.label })),
       outputs: outputNodes.map(n => ({ id: Math.random().toString(36).slice(2), name: n.label })),
@@ -36,24 +36,10 @@ export default function FunctionEditor({ def, onSave, onClose }: Props): React.J
           <button onClick={save} style={{ marginLeft: 'auto' }}>保存</button>
           <button onClick={onClose}>关闭</button>
         </div>
-        <div style={{ padding: 12, background: '#0f172a', color: '#e5e7eb', borderRight: '1px solid #1f2937', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>入参（编辑 Input 节点名称）</div>
-            {inputNodes.map(n => (
-              <div key={n.id} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                <input value={n.label} onChange={e => renameNode(n.id, e.target.value)} style={{ flex: 1, background: '#111827', color: '#e5e7eb', border: '1px solid #374151', borderRadius: 6, padding: '6px 8px' }} />
-              </div>
-            ))}
-          </div>
-          <div>
-            <div style={{ fontWeight: 600, marginBottom: 8 }}>出参（编辑 Output 节点名称）</div>
-            {outputNodes.map(n => (
-              <div key={n.id} style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
-                <input value={n.label} onChange={e => renameNode(n.id, e.target.value)} style={{ flex: 1, background: '#111827', color: '#e5e7eb', border: '1px solid #374151', borderRadius: 6, padding: '6px 8px' }} />
-              </div>
-            ))}
-          </div>
-        </div>
+        <ControlLibrary
+          onAddNode={(n: Node) => setFuncGraph({ nodes: [...funcGraph.nodes, n], edges: funcGraph.edges })}
+          functions={[...functions, def]}
+        />
         <div>
           <NodeEditor
             graph={funcGraph}
@@ -63,7 +49,14 @@ export default function FunctionEditor({ def, onSave, onClose }: Props): React.J
             commitLiveChange={() => {}}
             onCreateFunction={() => {}}
             onUpdateFunction={() => {}}
-            functionLibrary={[]}
+            functionLibrary={functions}
+            onOpenFunction={(fid) => {
+              const next = functions.find(f => f.id === fid)
+              if (!next) return
+              setCurrentDef(next)
+              setName(next.name)
+              setFuncGraph({ nodes: next.graph.nodes, edges: next.graph.edges })
+            }}
           />
         </div>
       </div>

@@ -26,7 +26,10 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted,
     <div
       style={{ position: 'absolute', left: n.x, top: n.y, width: 160, height: 80, border: '2px solid ' + (highlighted ? '#ef4444' : selected ? '#3b82f6' : '#555'), borderRadius: 8, background: '#1f2937', color: '#fff', userSelect: 'none' }}
       onMouseDown={onMouseDown}
-      onDoubleClick={onDoubleClick}
+      onDoubleClick={(e) => {
+        e.stopPropagation()
+        onDoubleClick(e)
+      }}
     >
       <div style={{ padding: 8, fontWeight: 600, fontSize: 12 }}>{n.label}</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 4, padding: 8 }}>
@@ -664,6 +667,11 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
               if (n.type === 'CallFunction' && onOpenFunction) {
                 const fid = (n.data as any).functionId as string
                 if (fid) onOpenFunction(fid)
+              } else {
+                const newLabel = window.prompt('节点名称', n.label) || n.label
+                if (newLabel !== n.label) {
+                  setGraph({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, label: newLabel } : x)), edges: graph.edges })
+                }
               }
             }}
             onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)}

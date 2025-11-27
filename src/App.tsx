@@ -158,7 +158,7 @@ function App(): React.JSX.Element {
         functionLibrary={functions}
       />
       {editingFunction && (
-        <FunctionEditor def={editingFunction} onSave={saveFunction} onClose={() => setEditingFunction(null)} />
+        <FunctionEditor def={editingFunction} onSave={saveFunction} onClose={() => setEditingFunction(null)} functions={functions} />
       )}
       <ImageLibrary images={images} onAddImage={(i) => setImages([...images, i])} />
     </div>
