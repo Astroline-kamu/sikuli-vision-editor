@@ -340,11 +340,11 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     const dyw = world.y - n.y
     draggingRef.current = { id: n.id, dxw, dyw }
     beginLiveChange()
-    const willSelect = graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : x))
+    const selectedCount = graph.nodes.filter(x => x.selected).length
+    const clickedIsSelected = !!n.selected
+    const willSelect = selectedCount > 1 && clickedIsSelected ? graph.nodes : graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: false }))
     setGraphLive({ nodes: willSelect, edges: graph.edges })
-    const selectedItems = graph.nodes
-      .map(x => (x.id === n.id ? { ...x, selected: true } : x))
-      .filter(x => x.selected)
+    const selectedItems = willSelect.filter(x => x.selected)
     groupDragRef.current = { startX: world.x, startY: world.y, items: selectedItems.map(x => ({ id: x.id, x: x.x, y: x.y })) }
   }
 
