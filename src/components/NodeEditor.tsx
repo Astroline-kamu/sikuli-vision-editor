@@ -52,6 +52,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   const [camera, setCamera] = useState<Camera>({ scale: 1, offset: { x: 0, y: 0 } })
   const panningRef = useRef<{ sx: number; sy: number } | null>(null)
   const [isPanning, setIsPanning] = useState(false)
+  const [snapTarget, setSnapTarget] = useState<{ nodeId: string; portId: string; isOutput: boolean } | null>(null)
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = editorRef.current!.getBoundingClientRect()
@@ -69,6 +70,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       } else if (connecting) {
         const w = toWorld(e.clientX, e.clientY)
         setConnecting({ ...connecting, x: w.x, y: w.y })
+        setSnapTarget(nearestPort(w.x, w.y, 24))
       } else if (panningRef.current) {
         const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
         panningRef.current = { sx: e.clientX, sy: e.clientY }
@@ -156,13 +158,14 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       setIsPanning(false)
     }
     if (connecting) {
-      const n = nearestPort(connecting.x, connecting.y)
+      const n = snapTarget ?? nearestPort(connecting.x, connecting.y)
       if (n) {
         const node = graph.nodes.find(x => x.id === n.nodeId)
         if (node) finishConnect(node, n.portId, n.isOutput, (e as unknown) as React.MouseEvent)
       } else {
         setConnecting(null)
       }
+      setSnapTarget(null)
     }
   }
 
@@ -216,7 +219,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     setConnecting(null)
   }
 
-  function nearestPort(xw: number, yw: number): { nodeId: string; portId: string; isOutput: boolean } | null {
+  function nearestPort(xw: number, yw: number, pixelRadius = 20): { nodeId: string; portId: string; isOutput: boolean } | null {
     const rect = editorRef.current!.getBoundingClientRect()
     let best: { nodeId: string; portId: string; isOutput: boolean } | null = null
     let bestD = Infinity
@@ -246,7 +249,8 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         }
       })
     })
-    if (best && bestD <= 16) return best
+    const thresholdWorld = pixelRadius / camera.scale
+    if (best && bestD <= thresholdWorld) return best
     return null
   }
 
@@ -368,8 +372,28 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
             const from = graph.nodes.find(n => n.id === connecting.fromNodeId)
             if (!from) return null
             const a1 = portAnchor(from, connecting.fromPortId, connecting.fromIsOutput)
-            const d = `M ${a1.x} ${a1.y} L ${connecting.x} ${connecting.y}`
-            return <path d={d} stroke={connecting.fromIsOutput ? '#f59e0b' : '#10b981'} fill="none" strokeWidth={2} />
+            let ex = connecting.x
+            let ey = connecting.y
+            if (snapTarget) {
+              const targetNode = graph.nodes.find(n => n.id === snapTarget.nodeId)
+              if (targetNode) {
+                const a2 = portAnchor(targetNode, snapTarget.portId, snapTarget.isOutput)
+                ex = a2.x
+                ey = a2.y
+              }
+            }
+            const d = `M ${a1.x} ${a1.y} L ${ex} ${ey}`
+            return (
+              <>
+                <path d={d} stroke={connecting.fromIsOutput ? '#f59e0b' : '#10b981'} fill="none" strokeWidth={2} />
+                {snapTarget && (() => {
+                  const targetNode = graph.nodes.find(n => n.id === snapTarget.nodeId)
+                  if (!targetNode) return null
+                  const a2 = portAnchor(targetNode, snapTarget.portId, snapTarget.isOutput)
+                  return <circle cx={a2.x} cy={a2.y} r={6} fill="none" stroke="#e5e7eb" strokeDasharray="2,2" />
+                })()}
+              </>
+            )
           })()}
         </svg>
         {graph.nodes.map(n => (
