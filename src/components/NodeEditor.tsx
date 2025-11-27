@@ -15,7 +15,7 @@ function uid(): string {
 
 //
 
-function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string) => void }): React.JSX.Element {
+function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string, isOutput: boolean) => void }): React.JSX.Element {
   const selected = n.selected
   return (
     <div
@@ -27,7 +27,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node;
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {n.inputPorts.map(p => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 10, height: 10, borderRadius: 5, background: '#10b981', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, false)} onMouseUp={e => onPortMouseUp(e, p.id)} />
+              <div id={`port-${p.id}`} style={{ width: 10, height: 10, borderRadius: 5, background: '#10b981', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, false)} onMouseUp={e => onPortMouseUp(e, p.id, false)} />
               <div style={{ fontSize: 11 }}>{p.name}</div>
             </div>
           ))}
@@ -36,7 +36,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node;
           {n.outputPorts.map(p => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' }}>
               <div style={{ fontSize: 11 }}>{p.name}</div>
-              <div style={{ width: 10, height: 10, borderRadius: 5, background: '#f59e0b', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, true)} />
+              <div id={`port-${p.id}`} style={{ width: 10, height: 10, borderRadius: 5, background: '#f59e0b', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, true)} onMouseUp={e => onPortMouseUp(e, p.id, true)} />
             </div>
           ))}
         </div>
@@ -48,7 +48,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node;
 export default function NodeEditor({ graph, setGraph, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dxw: number; dyw: number } | null>(null)
-  const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; x: number; y: number } | null>(null)
+  const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; fromIsOutput: boolean; x: number; y: number } | null>(null)
   const [camera, setCamera] = useState<Camera>({ scale: 1, offset: { x: 0, y: 0 } })
   const panningRef = useRef<{ sx: number; sy: number } | null>(null)
   const [isPanning, setIsPanning] = useState(false)
@@ -155,6 +155,15 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       panningRef.current = null
       setIsPanning(false)
     }
+    if (connecting) {
+      const n = nearestPort(connecting.x, connecting.y)
+      if (n) {
+        const node = graph.nodes.find(x => x.id === n.nodeId)
+        if (node) finishConnect(node, n.portId, n.isOutput, (e as unknown) as React.MouseEvent)
+      } else {
+        setConnecting(null)
+      }
+    }
   }
 
   function onPointerCancel(e: React.PointerEvent): void {
@@ -175,29 +184,70 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
 
   function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
     e.stopPropagation()
-    if (isOutput) {
-      const w = toWorld(e.clientX, e.clientY)
-      setConnecting({ fromNodeId: n.id, fromPortId: portId, x: w.x, y: w.y })
-    }
+    const w = toWorld(e.clientX, e.clientY)
+    setConnecting({ fromNodeId: n.id, fromPortId: portId, fromIsOutput: isOutput, x: w.x, y: w.y })
   }
 
-  function finishConnect(n: Node, portId: string, e: React.MouseEvent): void {
+  function finishConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
     e.stopPropagation()
     if (!connecting) return
     const fromNodeId = connecting.fromNodeId
     const toNodeId = n.id
-    if (fromNodeId === toNodeId) {
+    if (fromNodeId === toNodeId && connecting.fromPortId === portId) {
       setConnecting(null)
       return
     }
-    const exists = graph.edges.some(ed => ed.toPortId === portId)
+    const valid = (connecting.fromIsOutput && !isOutput) || (!connecting.fromIsOutput && isOutput)
+    if (!valid) {
+      setConnecting(null)
+      return
+    }
+    const toPortId = isOutput ? connecting.fromPortId : portId
+    const fromPortId = isOutput ? portId : connecting.fromPortId
+    const fromId = isOutput ? toNodeId : fromNodeId
+    const toId = isOutput ? fromNodeId : toNodeId
+    const exists = graph.edges.some(ed => ed.toPortId === toPortId)
     if (exists) {
       setConnecting(null)
       return
     }
-    const newEdge: Edge = { id: uid(), fromNodeId: connecting.fromNodeId, fromPortId: connecting.fromPortId, toNodeId, toPortId: portId }
+    const newEdge: Edge = { id: uid(), fromNodeId: fromId, fromPortId, toNodeId: toId, toPortId: toPortId }
     setGraph({ nodes: graph.nodes, edges: [...graph.edges, newEdge] })
     setConnecting(null)
+  }
+
+  function nearestPort(xw: number, yw: number): { nodeId: string; portId: string; isOutput: boolean } | null {
+    const rect = editorRef.current!.getBoundingClientRect()
+    let best: { nodeId: string; portId: string; isOutput: boolean } | null = null
+    let bestD = Infinity
+    graph.nodes.forEach(n => {
+      n.inputPorts.forEach(p => {
+        const el = document.getElementById(`port-${p.id}`)
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const cx = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).x
+        const cy = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).y
+        const d = Math.hypot(cx - xw, cy - yw)
+        if (d < bestD) {
+          bestD = d
+          best = { nodeId: n.id, portId: p.id, isOutput: false }
+        }
+      })
+      n.outputPorts.forEach(p => {
+        const el = document.getElementById(`port-${p.id}`)
+        if (!el) return
+        const r = el.getBoundingClientRect()
+        const cx = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).x
+        const cy = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).y
+        const d = Math.hypot(cx - xw, cy - yw)
+        if (d < bestD) {
+          bestD = d
+          best = { nodeId: n.id, portId: p.id, isOutput: true }
+        }
+      })
+    })
+    if (best && bestD <= 16) return best
+    return null
   }
 
   function onWheel(e: React.WheelEvent): void {
@@ -208,6 +258,14 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   }
 
   function portAnchor(n: Node, portId: string, isOutput: boolean): { x: number; y: number } {
+    const rect = editorRef.current!.getBoundingClientRect()
+    const el = document.getElementById(`port-${portId}`)
+    if (el) {
+      const r = el.getBoundingClientRect()
+      const cx = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).x
+      const cy = camToWorld(camera, rect, r.left + r.width / 2, r.top + r.height / 2).y
+      return { x: cx, y: cy }
+    }
     const idx = (isOutput ? n.outputPorts : n.inputPorts).findIndex(p => p.id === portId)
     const baseY = n.y + 32
     const step = 22
@@ -276,7 +334,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`
       return { id: e.id, d }
     }).filter(Boolean) as { id: string; d: string }[]
-  }, [graph])
+  }, [graph, camera])
 
   return (
     <div
@@ -306,18 +364,16 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
           {edgesPath.map(p => (
             <path key={p.id} d={p.d} stroke="#9ca3af" fill="none" strokeWidth={2} />
           ))}
-          {connecting && (
-            (() => {
-              const from = graph.nodes.find(n => n.id === connecting.fromNodeId)
-              if (!from) return null
-              const a1 = portAnchor(from, connecting.fromPortId, true)
-              const d = `M ${a1.x} ${a1.y} L ${connecting.x} ${connecting.y}`
-              return <path d={d} stroke="#f59e0b" fill="none" strokeWidth={2} />
-            })()
-          )}
+          {connecting && (() => {
+            const from = graph.nodes.find(n => n.id === connecting.fromNodeId)
+            if (!from) return null
+            const a1 = portAnchor(from, connecting.fromPortId, connecting.fromIsOutput)
+            const d = `M ${a1.x} ${a1.y} L ${connecting.x} ${connecting.y}`
+            return <path d={d} stroke={connecting.fromIsOutput ? '#f59e0b' : '#10b981'} fill="none" strokeWidth={2} />
+          })()}
         </svg>
         {graph.nodes.map(n => (
-          <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid) => finishConnect(n, pid, e)} />
+          <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid, out) => finishConnect(n, pid, out, e)} />
         ))}
       </div>
     </div>
