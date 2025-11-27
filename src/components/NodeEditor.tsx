@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Graph, Node, Edge, FunctionDef } from '../types/graph'
 import { Camera, panStart, panUpdate, toWorld as camToWorld, zoomAt } from '../lib/camera'
 
@@ -500,11 +500,14 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
     setGraph({ nodes: [...graph.nodes, node], edges: graph.edges })
   }
 
-  const edgesPath = useMemo(() => {
-    return graph.edges.map(e => {
+  const [edgesPaths, setEdgesPaths] = useState<{ id: string; d: string }[]>([])
+
+  useEffect(() => {
+    const paths: { id: string; d: string }[] = []
+    graph.edges.forEach(e => {
       const from = graph.nodes.find(n => n.id === e.fromNodeId)
       const to = graph.nodes.find(n => n.id === e.toNodeId)
-      if (!from || !to) return null
+      if (!from || !to) return
       const a1 = portAnchor(from, e.fromPortId, true)
       const a2 = portAnchor(to, e.toPortId, false)
       const x1 = a1.x
@@ -513,8 +516,9 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
       const y2 = a2.y
       const mx = (x1 + x2) / 2
       const d = `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`
-      return { id: e.id, d }
-    }).filter(Boolean) as { id: string; d: string }[]
+      paths.push({ id: e.id, d })
+    })
+    setEdgesPaths(paths)
   }, [graph, camera])
 
   return (
@@ -548,7 +552,7 @@ export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveCha
           style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6, pointerEvents: 'none' }}
         />
         <svg style={{ position: 'absolute', inset: 0, overflow: 'visible' }}>
-          {edgesPath.map(p => (
+          {edgesPaths.map(p => (
             <path key={p.id} d={p.d} stroke={eraseHits.edges.has(p.id) ? '#ef4444' : '#9ca3af'} fill="none" strokeWidth={2} />
           ))}
           {connecting && (() => {
