@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Graph, Node, Edge, FunctionDef } from '../types/graph'
+import { Camera, panStart, panUpdate, toWorld as camToWorld, zoomAt } from '../lib/camera'
 
 type Props = {
   graph: Graph
@@ -46,40 +47,31 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node;
 
 export default function NodeEditor({ graph, setGraph, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
-  const draggingRef = useRef<{ id: string; dx: number; dy: number } | null>(null)
+  const draggingRef = useRef<{ id: string; dxw: number; dyw: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; x: number; y: number } | null>(null)
-  const [scale, setScale] = useState(1)
-  const [offset, setOffset] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
-  const panningRef = useRef<{ startX: number; startY: number } | null>(null)
-
-  function clamp(v: number, min: number, max: number): number {
-    return Math.max(min, Math.min(max, v))
-  }
+  const [camera, setCamera] = useState<Camera>({ scale: 1, offset: { x: 0, y: 0 } })
+  const panningRef = useRef<{ sx: number; sy: number } | null>(null)
 
   function toWorld(clientX: number, clientY: number): { x: number; y: number } {
     const rect = editorRef.current!.getBoundingClientRect()
-    const x = (clientX - rect.left - offset.x) / scale
-    const y = (clientY - rect.top - offset.y) / scale
-    return { x, y }
+    return camToWorld(camera, rect, clientX, clientY)
   }
 
   useEffect(() => {
     function onMouseMove(e: MouseEvent): void {
       if (draggingRef.current) {
-        const { id, dx, dy } = draggingRef.current
-        const nx = e.clientX - dx
-        const ny = e.clientY - dy
-        const world = toWorld(nx, ny)
-        setGraph({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: world.x, y: world.y } : n)), edges: graph.edges })
+        const { id, dxw, dyw } = draggingRef.current
+        const w = toWorld(e.clientX, e.clientY)
+        const nx = w.x - dxw
+        const ny = w.y - dyw
+        setGraph({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)), edges: graph.edges })
       } else if (connecting) {
         const w = toWorld(e.clientX, e.clientY)
         setConnecting({ ...connecting, x: w.x, y: w.y })
       } else if (panningRef.current) {
-        const dx = e.clientX - panningRef.current.startX
-        const dy = e.clientY - panningRef.current.startY
-        panningRef.current.startX = e.clientX
-        panningRef.current.startY = e.clientY
-        setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }))
+        const next = panUpdate(camera, { sx: panningRef.current.sx, sy: panningRef.current.sy }, e.clientX, e.clientY)
+        panningRef.current = { sx: e.clientX, sy: e.clientY }
+        setCamera({ scale: camera.scale, offset: next })
       }
     }
     function onMouseUp(): void {
@@ -128,17 +120,17 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   }, [graph, onCreateFunction, setGraph])
 
   function onBackgroundMouseDown(e: React.MouseEvent): void {
-    if (e.target === editorRef.current) {
+    if (e.target === editorRef.current && e.button === 1) {
       setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
-      panningRef.current = { startX: e.clientX, startY: e.clientY }
+      panningRef.current = panStart(e.clientX, e.clientY)
     }
   }
 
   function startDragNode(n: Node, e: React.MouseEvent): void {
     const world = toWorld(e.clientX, e.clientY)
-    const dx = e.clientX - (world.x)
-    const dy = e.clientY - (world.y)
-    draggingRef.current = { id: n.id, dx, dy }
+    const dxw = world.x - n.x
+    const dyw = world.y - n.y
+    draggingRef.current = { id: n.id, dxw, dyw }
     setGraph({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
   }
 
@@ -172,13 +164,8 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
   function onWheel(e: React.WheelEvent): void {
     e.preventDefault()
     const rect = editorRef.current!.getBoundingClientRect()
-    const mouseClient = { x: e.clientX, y: e.clientY }
-    const world = toWorld(mouseClient.x, mouseClient.y)
-    const nextScale = clamp(scale * (1 - e.deltaY * 0.001), 0.25, 2)
-    const nextOffsetX = mouseClient.x - rect.left - world.x * nextScale
-    const nextOffsetY = mouseClient.y - rect.top - world.y * nextScale
-    setScale(nextScale)
-    setOffset({ x: nextOffsetX, y: nextOffsetY })
+    const next = zoomAt(camera, rect, e.clientX, e.clientY, e.deltaY)
+    setCamera(next)
   }
 
   function portAnchor(n: Node, portId: string, isOutput: boolean): { x: number; y: number } {
@@ -261,7 +248,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       onDragOver={e => e.preventDefault()}
       onDrop={onDrop}
     >
-      <div style={{ position: 'absolute', inset: 0, transform: `translate(${offset.x}px, ${offset.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
+      <div style={{ position: 'absolute', inset: 0, transform: `translate(${camera.offset.x}px, ${camera.offset.y}px) scale(${camera.scale})`, transformOrigin: '0 0' }}>
         <div
           style={{ position: 'absolute', left: 0, top: 0, width: 5000, height: 5000, backgroundImage: `repeating-linear-gradient(0deg, #111 0, #111 1px, transparent 1px, transparent 20px), repeating-linear-gradient(90deg, #111 0, #111 1px, transparent 1px, transparent 20px)`, opacity: 0.6 }}
         />
