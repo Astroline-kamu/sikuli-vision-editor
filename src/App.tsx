@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import "./App.css";
 import NodeEditor from "./components/NodeEditor";
 import ControlLibrary from "./components/ControlLibrary";
@@ -7,20 +7,20 @@ import { FunctionDef, Graph, Node } from "./types/graph";
 import { graphToPython } from "./lib/codegen/python";
 import { pythonToGraph } from "./lib/parser/python";
 
-function App() {
+function App(): React.JSX.Element {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [images, setImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [functions, setFunctions] = useState<FunctionDef[]>([]);
 
-  function onAddNode(n: Node) {
+  function onAddNode(n: Node): void {
     setGraph({ nodes: [...graph.nodes, n], edges: graph.edges });
   }
 
-  function onCreateFunction(def: FunctionDef) {
+  function onCreateFunction(def: FunctionDef): void {
     setFunctions([...functions, def]);
   }
 
-  function exportPy() {
+  function exportPy(): void {
     const code = graphToPython(graph);
     const blob = new Blob([code], { type: "text/x-python" });
     const url = URL.createObjectURL(blob);
@@ -31,7 +31,7 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
-  function importPy(e: React.ChangeEvent<HTMLInputElement>) {
+  function importPy(e: React.ChangeEvent<HTMLInputElement>): void {
     const f = e.target.files?.[0];
     if (!f) return;
     const reader = new FileReader();

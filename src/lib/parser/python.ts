@@ -1,4 +1,4 @@
-import { Graph, Node } from '../types/graph'
+import { Edge, Graph, Node } from '../../types/graph'
 
 function uid() {
   return Math.random().toString(36).slice(2)
@@ -6,7 +6,7 @@ function uid() {
 
 export function pythonToGraph(code: string): Graph {
   const nodes: Node[] = []
-  const edges: any[] = []
+  const edges: Edge[] = []
   const lines = code.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
   let lastNode: Node | null = null
   lines.forEach(line => {

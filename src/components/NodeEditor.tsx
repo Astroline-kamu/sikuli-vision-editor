@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Graph, Node, Edge, FunctionDef, Port } from '../types/graph'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Graph, Node, Edge, FunctionDef } from '../types/graph'
 
 type Props = {
   graph: Graph
@@ -8,15 +8,13 @@ type Props = {
   functionLibrary: FunctionDef[]
 }
 
-function uid() {
+function uid(): string {
   return Math.random().toString(36).slice(2)
 }
 
-function hitTestNode(nodes: Node[], x: number, y: number) {
-  return nodes.findLast(n => x >= n.x && x <= n.x + 160 && y >= n.y && y <= n.y + 80)
-}
+//
 
-function NodeView({ n, onMouseDown, onPortMouseDown }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void }) {
+function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp }: { n: Node; onMouseDown: (e: React.MouseEvent) => void; onPortMouseDown: (e: React.MouseEvent, portId: string, isOutput: boolean) => void; onPortMouseUp: (e: React.MouseEvent, portId: string) => void }): React.JSX.Element {
   const selected = n.selected
   return (
     <div
@@ -28,7 +26,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown }: { n: Node; onMouseDown: (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {n.inputPorts.map(p => (
             <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 10, height: 10, borderRadius: 5, background: '#10b981', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, false)} />
+              <div style={{ width: 10, height: 10, borderRadius: 5, background: '#10b981', cursor: 'crosshair' }} onMouseDown={e => onPortMouseDown(e, p.id, false)} onMouseUp={e => onPortMouseUp(e, p.id)} />
               <div style={{ fontSize: 11 }}>{p.name}</div>
             </div>
           ))}
@@ -46,13 +44,13 @@ function NodeView({ n, onMouseDown, onPortMouseDown }: { n: Node; onMouseDown: (
   )
 }
 
-export default function NodeEditor({ graph, setGraph, onCreateFunction, functionLibrary }: Props) {
+export default function NodeEditor({ graph, setGraph, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dx: number; dy: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; x: number; y: number } | null>(null)
 
   useEffect(() => {
-    function onMouseMove(e: MouseEvent) {
+    function onMouseMove(e: MouseEvent): void {
       if (draggingRef.current) {
         const { id, dx, dy } = draggingRef.current
         const nx = e.clientX - dx
@@ -65,7 +63,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         setConnecting({ ...connecting, x: e.clientX, y: e.clientY })
       }
     }
-    function onMouseUp() {
+    function onMouseUp(): void {
       draggingRef.current = null
       setConnecting(null)
     }
@@ -109,28 +107,43 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [graph, onCreateFunction, setGraph])
 
-  function onBackgroundMouseDown(e: React.MouseEvent) {
+  function onBackgroundMouseDown(e: React.MouseEvent): void {
     if (e.target === editorRef.current) {
       setGraph({ nodes: graph.nodes.map(n => ({ ...n, selected: false })), edges: graph.edges })
     }
   }
 
-  function startDragNode(n: Node, e: React.MouseEvent) {
+  function startDragNode(n: Node, e: React.MouseEvent): void {
     const dx = e.clientX - n.x
     const dy = e.clientY - n.y
     draggingRef.current = { id: n.id, dx, dy }
     setGraph({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
   }
 
-  function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent) {
+  function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
     e.stopPropagation()
     if (isOutput) {
       setConnecting({ fromNodeId: n.id, fromPortId: portId, x: e.clientX, y: e.clientY })
-    } else if (connecting) {
-      const newEdge: Edge = { id: uid(), fromNodeId: connecting.fromNodeId, fromPortId: connecting.fromPortId, toNodeId: n.id, toPortId: portId }
-      setGraph({ nodes: graph.nodes, edges: [...graph.edges, newEdge] })
-      setConnecting(null)
     }
+  }
+
+  function finishConnect(n: Node, portId: string, e: React.MouseEvent): void {
+    e.stopPropagation()
+    if (!connecting) return
+    const fromNodeId = connecting.fromNodeId
+    const toNodeId = n.id
+    if (fromNodeId === toNodeId) {
+      setConnecting(null)
+      return
+    }
+    const exists = graph.edges.some(ed => ed.toPortId === portId)
+    if (exists) {
+      setConnecting(null)
+      return
+    }
+    const newEdge: Edge = { id: uid(), fromNodeId: connecting.fromNodeId, fromPortId: connecting.fromPortId, toNodeId, toPortId: portId }
+    setGraph({ nodes: graph.nodes, edges: [...graph.edges, newEdge] })
+    setConnecting(null)
   }
 
   const edgesPath = useMemo(() => {
@@ -157,7 +170,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         {connecting && <path d={`M ${graph.nodes.find(n => n.id === connecting.fromNodeId)?.x! + 160} ${graph.nodes.find(n => n.id === connecting.fromNodeId)?.y! + 40} L ${connecting.x} ${connecting.y}`} stroke="#f59e0b" fill="none" strokeWidth={2} />}
       </svg>
       {graph.nodes.map(n => (
-        <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} />
+        <NodeView key={n.id} n={n} onMouseDown={e => startDragNode(n, e)} onPortMouseDown={(e, pid, out) => startConnect(n, pid, out, e)} onPortMouseUp={(e, pid) => finishConnect(n, pid, e)} />
       ))}
     </div>
   )

@@ -1,6 +1,6 @@
-import { Edge, Graph, Node } from '../types/graph'
+import { Graph, Node, getImageClickData, getWaitData, getSetVarData, getIfData, getLoopData } from '../../types/graph'
 
-function topo(graph: Graph) {
+function topo(graph: Graph): Node[] {
   const incoming = new Map<string, number>()
   graph.nodes.forEach(n => incoming.set(n.id, 0))
   graph.edges.forEach(e => incoming.set(e.toNodeId, (incoming.get(e.toNodeId) || 0) + 1))
@@ -19,17 +19,22 @@ function topo(graph: Graph) {
   return res
 }
 
-function genNode(n: Node) {
-  if (n.type === 'ImageClick') return `click("${n.data?.image || ''}")`
-  if (n.type === 'Wait') return `wait(${n.data?.seconds || 1})`
-  if (n.type === 'SetVar') return `${n.data?.name || 'var'} = ${JSON.stringify(n.data?.value ?? '')}`
-  if (n.type === 'If') return `# if ${n.data?.condition || ''}`
-  if (n.type === 'Loop') return `# for ${n.data?.times || 1}`
+function genNode(n: Node): string {
+  const img = getImageClickData(n)
+  if (img) return `click("${img.image}")`
+  const wait = getWaitData(n)
+  if (wait) return `wait(${wait.seconds})`
+  const setv = getSetVarData(n)
+  if (setv) return `${setv.name} = ${JSON.stringify(setv.value)}`
+  const iff = getIfData(n)
+  if (iff) return `# if ${iff.condition}`
+  const loop = getLoopData(n)
+  if (loop) return `# for ${loop.times}`
   if (n.type === 'CallFunction') return `${n.label}()`
   return ''
 }
 
-export function graphToPython(graph: Graph) {
+export function graphToPython(graph: Graph): string {
   const lines: string[] = []
   lines.push('from sikuli import *')
   topo(graph).forEach(n => {

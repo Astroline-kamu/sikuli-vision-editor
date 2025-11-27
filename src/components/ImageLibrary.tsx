@@ -1,18 +1,18 @@
-import { useRef, useState } from 'react'
+import React, { useRef } from 'react'
 
 type Props = {
   onAddImage: (img: { id: string; name: string; dataUrl: string }) => void
   images: { id: string; name: string; dataUrl: string }[]
 }
 
-function uid() {
+function uid(): string {
   return Math.random().toString(36).slice(2)
 }
 
-export default function ImageLibrary({ onAddImage, images }: Props) {
+export default function ImageLibrary({ onAddImage, images }: Props): React.JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null)
 
-  async function onPick(e: React.ChangeEvent<HTMLInputElement>) {
+  async function onPick(e: React.ChangeEvent<HTMLInputElement>): Promise<void> {
     const f = e.target.files?.[0]
     if (!f) return
     const reader = new FileReader()

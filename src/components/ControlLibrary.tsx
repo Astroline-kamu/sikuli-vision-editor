@@ -1,4 +1,5 @@
-import { Graph, Node } from '../types/graph'
+import React from 'react'
+import { Node, NodeType } from '../types/graph'
 
 type Props = {
   onAddNode: (n: Node) => void
@@ -8,8 +9,8 @@ function uid() {
   return Math.random().toString(36).slice(2)
 }
 
-export default function ControlLibrary({ onAddNode }: Props) {
-  const items = [
+export default function ControlLibrary({ onAddNode }: Props): React.JSX.Element {
+  const items: ReadonlyArray<{ type: NodeType; label: string; inputs: string[]; outputs: string[] }> = [
     { type: 'Input', label: 'Input', inputs: [], outputs: ['out'] },
     { type: 'Output', label: 'Output', inputs: ['in'], outputs: [] },
     { type: 'ImageClick', label: 'Click Image', inputs: ['in'], outputs: ['out'] },
@@ -18,18 +19,45 @@ export default function ControlLibrary({ onAddNode }: Props) {
     { type: 'Loop', label: 'Loop', inputs: ['in'], outputs: ['out'] },
     { type: 'SetVar', label: 'Set Var', inputs: ['in'], outputs: ['out'] },
     { type: 'CallFunction', label: 'Call Function', inputs: ['in'], outputs: ['out'] },
-  ] as const
+  ]
 
-  function add(i: (typeof items)[number]) {
+  function add(i: (typeof items)[number]): void {
+    let data: Node['data']
+    switch (i.type) {
+      case 'ImageClick':
+        data = { image: '' }
+        break
+      case 'Wait':
+        data = { seconds: 1 }
+        break
+      case 'If':
+        data = { condition: '' }
+        break
+      case 'Loop':
+        data = { times: 1 }
+        break
+      case 'SetVar':
+        data = { name: 'var', value: '' }
+        break
+      case 'CallFunction':
+        data = { functionId: '' }
+        break
+      case 'Input':
+      case 'Output':
+        data = {}
+        break
+      default:
+        data = {}
+    }
     const node: Node = {
       id: uid(),
-      type: i.type as any,
+      type: i.type,
       label: i.label,
       x: 40,
       y: 40,
       inputPorts: i.inputs.map(n => ({ id: uid(), name: n })),
       outputPorts: i.outputs.map(n => ({ id: uid(), name: n })),
-      data: {},
+      data,
     }
     onAddNode(node)
   }
