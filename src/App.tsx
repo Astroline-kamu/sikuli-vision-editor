@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import "./App.css";
 import NodeEditor from "./components/NodeEditor";
 import ControlLibrary from "./components/ControlLibrary";
@@ -11,9 +11,49 @@ function App(): React.JSX.Element {
   const [graph, setGraph] = useState<Graph>({ nodes: [], edges: [] });
   const [images, setImages] = useState<{ id: string; name: string; dataUrl: string }[]>([]);
   const [functions, setFunctions] = useState<FunctionDef[]>([]);
+  const pastRef = useRef<Graph[]>([]);
+  const futureRef = useRef<Graph[]>([]);
+
+  function cloneGraph(g: Graph): Graph {
+    return JSON.parse(JSON.stringify(g)) as Graph;
+  }
+
+  function applyGraph(next: Graph): void {
+    pastRef.current.push(cloneGraph(graph));
+    setGraph(next);
+    futureRef.current = [];
+  }
+
+  function undo(): void {
+    if (pastRef.current.length === 0) return;
+    const prev = pastRef.current.pop()!;
+    futureRef.current.push(cloneGraph(graph));
+    setGraph(prev);
+  }
+
+  function redo(): void {
+    if (futureRef.current.length === 0) return;
+    const next = futureRef.current.pop()!;
+    pastRef.current.push(cloneGraph(graph));
+    setGraph(next);
+  }
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.ctrlKey && !e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        undo();
+      } else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        redo();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [graph]);
 
   function onAddNode(n: Node): void {
-    setGraph({ nodes: [...graph.nodes, n], edges: graph.edges });
+    applyGraph({ nodes: [...graph.nodes, n], edges: graph.edges });
   }
 
   function onCreateFunction(def: FunctionDef): void {
@@ -38,7 +78,7 @@ function App(): React.JSX.Element {
     reader.onload = () => {
       const code = String(reader.result);
       const g = pythonToGraph(code);
-      setGraph(g);
+      applyGraph(g);
     };
     reader.readAsText(f);
   }
@@ -54,7 +94,20 @@ function App(): React.JSX.Element {
         </label>
       </div>
       <ControlLibrary onAddNode={onAddNode} />
-      <NodeEditor graph={graph} setGraph={setGraph} onCreateFunction={onCreateFunction} functionLibrary={functions} />
+      <NodeEditor
+        graph={graph}
+        setGraph={applyGraph}
+        setGraphLive={setGraph}
+        beginLiveChange={() => {
+          pastRef.current.push(cloneGraph(graph));
+          futureRef.current = [];
+        }}
+        commitLiveChange={() => {
+          /* No-op: past already recorded at begin; current graph contains end */
+        }}
+        onCreateFunction={onCreateFunction}
+        functionLibrary={functions}
+      />
       <ImageLibrary images={images} onAddImage={(i) => setImages([...images, i])} />
     </div>
   );

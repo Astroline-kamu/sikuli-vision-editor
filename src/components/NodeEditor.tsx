@@ -5,6 +5,9 @@ import { Camera, panStart, panUpdate, toWorld as camToWorld, zoomAt } from '../l
 type Props = {
   graph: Graph
   setGraph: (g: Graph) => void
+  setGraphLive: (g: Graph) => void
+  beginLiveChange: () => void
+  commitLiveChange: () => void
   onCreateFunction: (def: FunctionDef) => void
   functionLibrary: FunctionDef[]
 }
@@ -45,7 +48,7 @@ function NodeView({ n, onMouseDown, onPortMouseDown, onPortMouseUp, highlighted 
   )
 }
 
-export default function NodeEditor({ graph, setGraph, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
+export default function NodeEditor({ graph, setGraph, setGraphLive, beginLiveChange, commitLiveChange, onCreateFunction, functionLibrary: _functionLibrary }: Props): React.JSX.Element {
   const editorRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef<{ id: string; dxw: number; dyw: number } | null>(null)
   const [connecting, setConnecting] = useState<{ fromNodeId: string; fromPortId: string; fromIsOutput: boolean; x: number; y: number } | null>(null)
@@ -75,7 +78,7 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
         const w = toWorld(e.clientX, e.clientY)
         const nx = w.x - dxw
         const ny = w.y - dyw
-        setGraph({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)), edges: graph.edges })
+        setGraphLive({ nodes: graph.nodes.map(n => (n.id === id ? { ...n, x: nx, y: ny } : n)), edges: graph.edges })
       } else if (connecting) {
         const w = toWorld(e.clientX, e.clientY)
         setConnecting({ ...connecting, x: w.x, y: w.y })
@@ -91,6 +94,9 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
       }
     }
     function onMouseUp(): void {
+      if (draggingRef.current) {
+        commitLiveChange()
+      }
       draggingRef.current = null
       setConnecting(null)
       panningRef.current = null
@@ -281,7 +287,8 @@ export default function NodeEditor({ graph, setGraph, onCreateFunction, function
     const dxw = world.x - n.x
     const dyw = world.y - n.y
     draggingRef.current = { id: n.id, dxw, dyw }
-    setGraph({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
+    beginLiveChange()
+    setGraphLive({ nodes: graph.nodes.map(x => (x.id === n.id ? { ...x, selected: true } : { ...x, selected: e.shiftKey ? x.selected : false })), edges: graph.edges })
   }
 
   function startConnect(n: Node, portId: string, isOutput: boolean, e: React.MouseEvent): void {
